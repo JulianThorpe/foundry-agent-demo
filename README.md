@@ -1,0 +1,106 @@
+# Bounded agent on Microsoft Foundry
+
+A small tool-using agent running on a Microsoft Foundry model deployment, written to
+compare the managed-platform experience against building the same thing directly on a
+model vendor's API.
+
+The agent itself is deliberately unremarkable: one narrowly scoped tool, a capped
+reasoning loop, and a test suite that targets the permission boundary rather than the
+model. The interesting part is the reasoning behind each of those choices, and what
+the platform does and does not do for you.
+
+## Design decisions
+
+**One tool, with an allowlist.** The agent can navigate a visitor to a page, and only
+to a page on a fixed list. An agent's risk is a function of what its tools permit, so
+the worst outcome of a successful prompt injection here is an unwanted page change.
+Widening that surface is a decision to be made deliberately, not by default.
+
+**A capped loop.** An agent loop is unbounded unless you bound it. The iteration cap is
+five, with a plain fallback message when it is reached, so a confused model costs a
+fixed number of calls rather than an open-ended bill.
+
+**Tests target the boundary, not the model.** Model output is non-deterministic and
+testing it is mostly testing the weather. The permission boundary is deterministic and
+is the thing that actually matters for safety, so that is what the suite asserts:
+allowed pages succeed, unknown pages are rejected, every allowed page is reachable, and
+the iteration cap is within sane limits. A consequence worth noting is that the tests
+run in CI without any Azure credentials, because the testable logic lives outside the
+model call.
+
+**No API keys.** Authentication uses `DefaultAzureCredential` and a bearer token
+provider, so access is granted by role assignment rather than by a secret in a config
+file. This is the model Foundry pushes you toward and it is a real difference from
+key-based vendor APIs.
+
+## What this is not
+
+Small scale, single tool, no retrieval, no production traffic. An embedding model is
+deployed alongside the chat model but is not yet used. This is a study artefact rather
+than a product.
+
+## Running it
+
+```
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+az login --use-device-code
+python agent.py
+pytest -v
+```
+
+The caller needs the `Cognitive Services OpenAI User` role on the resource group.
+Subscription Owner is not sufficient, because the built-in Owner role carries no data
+actions. This produces a 401 that looks exactly like a code fault.
+
+## Provisioning
+
+Everything was provisioned from the CLI rather than the portal, so it is reproducible:
+
+```
+az group create --name rg-foundry-demo --location australiaeast
+az provider register --namespace Microsoft.CognitiveServices --wait
+az cognitiveservices account create --name foundry-jt-demo --resource-group rg-foundry-demo \
+  --location australiaeast --kind AIServices --sku S0 --custom-domain foundry-jt-demo --yes
+az cognitiveservices account deployment create --name foundry-jt-demo \
+  --resource-group rg-foundry-demo --deployment-name gpt-5-mini \
+  --model-name gpt-5-mini --model-version "2025-08-07" \
+  --model-format OpenAI --sku-capacity 10 --sku-name GlobalStandard
+az role assignment create --assignee <object-id> \
+  --role "Cognitive Services OpenAI User" --scope <resource-group-id>
+```
+
+## Notes from building it
+
+Things that a tutorial does not tell you and a working session does:
+
+**Resource providers are opt-in.** A new subscription is not registered for
+`Microsoft.CognitiveServices` until you register it, and the failure reads as a
+permissions problem rather than a configuration one.
+
+**Catalogue availability, regional capacity and subscription quota are three different
+things.** A model can be listed, be available in your region, and still have a quota
+limit of zero for your subscription. The first model chosen deployed nowhere; checking
+quota first would have been quicker than reading the error.
+
+**Model versions have a lifecycle.** Deployments pin a dated version, versions enter a
+deprecating state and stop accepting new deployments, and the default upgrade behaviour
+moves you forward when a new default appears. Somebody has to own that. Calling a vendor
+API directly has the same underlying problem but hides it behind a model alias.
+
+**A content filter policy is applied by default.** The deployment came with one attached
+without being asked for. That is a sensible default and it is also a behaviour you
+inherit rather than choose, which is worth knowing before an assurance conversation.
+
+## The comparison
+
+Building the same shape of agent against a vendor API directly means owning more and
+inheriting less: you choose the model and the safety layer, and you carry the
+configuration. On Foundry, the deployment is a managed resource with quota, versioning,
+content filtering and identity-based access attached to it, which removes work and adds
+governance surface at the same time.
+
+Neither is better in the abstract. The question is which set of defaults you want to
+inherit and which decisions you want to keep, and that is a judgement that should be
+made before the build rather than discovered during it.
