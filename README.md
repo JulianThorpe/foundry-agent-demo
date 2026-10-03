@@ -4,29 +4,40 @@ A small tool-using agent running on a Microsoft Foundry model deployment, writte
 compare the managed-platform experience against building the same thing directly on a
 model vendor's API.
 
-The agent itself is deliberately unremarkable: one narrowly scoped tool, a capped
-reasoning loop, and a test suite that targets the permission boundary rather than the
-model. The interesting part is the reasoning behind each of those choices, and what
-the platform does and does not do for you.
+The agent itself is deliberately small: two narrowly scoped tools, a capped reasoning
+loop, and a test suite that targets the boundaries rather than the model. The
+interesting part is the reasoning behind each of those choices, and what the platform
+does and does not do for you.
 
 ## Design decisions
 
-**One tool, with an allowlist.** The agent can navigate a visitor to a page, and only
-to a page on a fixed list. An agent's risk is a function of what its tools permit, so
-the worst outcome of a successful prompt injection here is an unwanted page change.
-Widening that surface is a decision to be made deliberately, not by default.
+**A navigation tool with an allowlist.** The agent can send a visitor to a page, but
+only to a page on a fixed list. An agent's risk is a function of what its tools permit,
+so the worst outcome of a successful prompt injection here is an unwanted page change.
+Widening that surface should be a deliberate decision, not a default.
+
+**A second tool that can fail.** The temperature lookup calls an external weather
+service (Open-Meteo), so it can time out, return a server error, or send back something
+unexpected. None of those raise an exception. Each comes back to the model as a
+structured result (`{"ok": false, "error": ...}`), and the system prompt tells the model
+to report the failure plainly rather than invent an answer. Coordinates are validated
+before any network call is made.
+
+**The model's mistakes are contained too.** Tool calls pass through a single dispatcher
+that rejects unknown tool names, malformed JSON and wrong argument names with the same
+structured failure. A bad call from the model costs one loop iteration, not the whole
+run.
 
 **A capped loop.** An agent loop is unbounded unless you bound it. The iteration cap is
 five, with a plain fallback message when it is reached, so a confused model costs a
 fixed number of calls rather than an open-ended bill.
 
-**Tests target the boundary, not the model.** Model output is non-deterministic and
-testing it is mostly testing the weather. The permission boundary is deterministic and
-is the thing that actually matters for safety, so that is what the suite asserts:
-allowed pages succeed, unknown pages are rejected, every allowed page is reachable, and
-the iteration cap is within sane limits. A consequence worth noting is that the tests
-run in CI without any Azure credentials, because the testable logic lives outside the
-model call.
+**Tests target the boundaries, not the model.** Model output is non-deterministic, so
+testing it mostly tests chance. The boundaries are deterministic and they are what
+matters for safety, so the 13 tests cover three areas: the page allowlist, every failure
+path of the external call (bad coordinates, timeout, server error, malformed response),
+and the dispatcher's handling of bad calls from the model. The network is mocked
+throughout, so the suite runs in CI with no Azure credentials and no outbound requests.
 
 **No API keys.** Authentication uses `DefaultAzureCredential` and a bearer token
 provider, so access is granted by role assignment rather than by a secret in a config
@@ -35,7 +46,7 @@ key-based vendor APIs.
 
 ## What this is not
 
-Small scale, single tool, no retrieval, no production traffic. An embedding model is
+Small scale, two tool, no retrieval, no production traffic. An embedding model is
 deployed alongside the chat model but is not yet used. This is a study artefact rather
 than a product.
 
