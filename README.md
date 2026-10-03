@@ -46,7 +46,7 @@ key-based vendor APIs.
 
 ## What this is not
 
-Small scale, two tool, no retrieval, no production traffic. An embedding model is
+Small scale, two tools, no retrieval, no production traffic. An embedding model is
 deployed alongside the chat model but is not yet used. This is a study artefact rather
 than a product.
 
