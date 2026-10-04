@@ -56,14 +56,26 @@ than a product.
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-az login --use-device-code
+az login --tenant <your-tenant-id>
 python agent.py
 pytest -v
 ```
 
+`python agent.py` starts an interactive chat. Each tool call is printed as it happens,
+so you can see what the agent actually did before its answer. A blank line quits.
+Useful things to try: a temperature question for any city, a request for an allowed
+page, a request for a page that is not on the allowlist, and a question with no
+location given.
+
 The caller needs the `Cognitive Services OpenAI User` role on the resource group.
 Subscription Owner is not sufficient, because the built-in Owner role carries no data
 actions. This produces a 401 that looks exactly like a code fault.
+
+Sign in with `az login --tenant`, not `--use-device-code`. Device-code sign-in is
+blocked by Microsoft Entra security defaults on a new tenant, and an account that is
+a guest in other directories may hit Conditional Access policies there too. The
+resulting errors (AADSTS530035, AADSTS530036) mention every tenant the account
+belongs to, which makes them look more serious than they are.
 
 ## Provisioning
 
