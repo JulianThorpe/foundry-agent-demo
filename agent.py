@@ -111,27 +111,32 @@ TOOLS = [
 ]
 
 
-def run(user_message: str) -> str:
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You help visitors. Use tools when relevant. If a tool reports a "
-                "failure, tell the user plainly rather than inventing an answer."
-            ),
-        },
-        {"role": "user", "content": user_message},
-    ]
+SYSTEM_PROMPT = (
+    "You help visitors. You have exactly two abilities: opening one of these pages "
+    "(home, pricing, contact, about) and looking up the current temperature at a "
+    "location. You cannot give forecasts, wind, rain or any other weather detail. "
+    "Do not offer anything outside these two abilities. If a tool reports a "
+    "failure, tell the user plainly rather than inventing an answer."
+    "If the user names a place, work out its coordinates yourself. If no place "
+    "is given, ask which city they mean."
+)
+
+
+def run(messages: list) -> str:
+    """Runs one turn of the conversation. Appends to `messages` in place, so the
+    caller keeps the history between turns."""
     for _ in range(MAX_ITERATIONS):
         response = client.chat.completions.create(
             model=DEPLOYMENT, messages=messages, tools=TOOLS
         )
         message = response.choices[0].message
         if not message.tool_calls:
+            messages.append({"role": "assistant", "content": message.content})
             return message.content
         messages.append(message)
         for call in message.tool_calls:
             result = execute_tool_call(call.function.name, call.function.arguments)
+            print(f"  [tool] {call.function.name}({call.function.arguments}) -> {result}")
             messages.append(
                 {
                     "role": "tool",
@@ -143,4 +148,8 @@ def run(user_message: str) -> str:
 
 
 if __name__ == "__main__":
-    print(run("What is the temperature in Canberra right now?"))
+    history = [{"role": "system", "content": SYSTEM_PROMPT}]
+    print("Ask something (blank line to quit).")
+    while question := input("> ").strip():
+        history.append({"role": "user", "content": question})
+        print(run(history))
